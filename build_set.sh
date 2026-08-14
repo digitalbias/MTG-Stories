@@ -17,6 +17,11 @@
 #   stories/NNN_Title.typ             (regenerated wrapper)
 #   stories/NNN_Title.pdf             (with images)
 #   stories/NNN_Title_no_images.pdf   (without images)
+#   stories/NNN_Title.epub            (via Typst's HTML export + pandoc)
+#
+# The EPUB is built from Typst's HTML export (not by reflowing the PDF, which
+# is messy) via `typst compile --features html`, then packaged with pandoc.
+# Requires `pandoc` on PATH in addition to `typst`.
 
 set -euo pipefail
 
@@ -62,6 +67,27 @@ build_one() {
 
     typst compile --root . --input with_images=false "$wrapper" "${wrapper%.typ}_no_images.pdf"
     echo "  compiled ${wrapper%.typ}_no_images.pdf"
+
+    # EPUB: Typst's HTML export -> pandoc. Typst's HTML export bumps every
+    # heading level by one (its own doc title claims <h1>), so the set-name
+    # heading lands as <h2> and story titles as <h3>; split-level=3 chapters
+    # on story titles. The lone <h2> (just the set name, redundant with
+    # --metadata title) is stripped so it doesn't show up as an empty extra
+    # chapter/TOC entry.
+    local html_tmp="${wrapper%.typ}_epub_tmp.html"
+    local herr
+    if ! herr=$(typst compile --root . --features html --format html "$wrapper" "$html_tmp" 2>&1); then
+        echo "$herr" >&2
+        echo "  ERROR: HTML export failed for '$base', skipping epub" >&2
+        rm -f "$html_tmp"
+        return
+    fi
+    perl -0777 -pe 's/<h2>.*?<\/h2>//s' -i "$html_tmp"
+    pandoc "$html_tmp" -o "${wrapper%.typ}.epub" \
+        --split-level=3 --toc --toc-depth=3 \
+        --metadata title="$title" --metadata author="Wizards of the Coast" 2>/dev/null
+    rm -f "$html_tmp"
+    echo "  compiled ${wrapper%.typ}.epub"
 }
 
 if [[ $# -eq 0 ]]; then

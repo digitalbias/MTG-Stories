@@ -2,6 +2,7 @@
 COMPLETE_STORIES.pdf
 COMPLETE_STORIES_WITHOUT_IMAGES.pdf
 stories/*.pdf
+stories/*.epub
 
 # Ignore binary files
 target/
