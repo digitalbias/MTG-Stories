@@ -21,7 +21,11 @@
 #
 # The EPUB is built from Typst's HTML export (not by reflowing the PDF, which
 # is messy) via `typst compile --features html`, then packaged with pandoc.
-# Requires `pandoc` on PATH in addition to `typst`.
+# Requires `pandoc` on PATH in addition to `typst`, and Python 3 with Pillow
+# (`pip install pillow`) to downscale the full-resolution art Typst embeds
+# as base64 before handing the HTML to pandoc -- large sets (e.g. March of
+# the Machine, 61 images) otherwise produce 170MB+ HTML that makes pandoc
+# thrash on memory.
 
 set -euo pipefail
 
@@ -75,6 +79,7 @@ build_one() {
     # --metadata title) is stripped so it doesn't show up as an empty extra
     # chapter/TOC entry.
     local html_tmp="${wrapper%.typ}_epub_tmp.html"
+    local html_shrunk="${wrapper%.typ}_epub_tmp_shrunk.html"
     local herr
     if ! herr=$(typst compile --root . --features html --format html "$wrapper" "$html_tmp" 2>&1); then
         echo "$herr" >&2
@@ -82,11 +87,17 @@ build_one() {
         rm -f "$html_tmp"
         return
     fi
-    perl -0777 -pe 's/<h2>.*?<\/h2>//s' -i "$html_tmp"
-    pandoc "$html_tmp" -o "${wrapper%.typ}.epub" \
+    if ! herr=$(python3 "$(dirname "$0")/shrink_html_images.py" "$html_tmp" "$html_shrunk" 2>&1); then
+        echo "$herr" >&2
+        echo "  ERROR: image shrink failed for '$base', skipping epub" >&2
+        rm -f "$html_tmp" "$html_shrunk"
+        return
+    fi
+    perl -0777 -pe 's/<h2>.*?<\/h2>//s' -i "$html_shrunk"
+    pandoc "$html_shrunk" -o "${wrapper%.typ}.epub" \
         --split-level=3 --toc --toc-depth=3 \
         --metadata title="$title" --metadata author="Wizards of the Coast" 2>/dev/null
-    rm -f "$html_tmp"
+    rm -f "$html_tmp" "$html_shrunk"
     echo "  compiled ${wrapper%.typ}.epub"
 }
 
