@@ -17,7 +17,8 @@
 #   stories/NNN_Title.typ             (regenerated wrapper)
 #   stories/NNN_Title.pdf             (with images)
 #   stories/NNN_Title_no_images.pdf   (without images)
-#   stories/NNN_Title.epub            (via Typst's HTML export + pandoc)
+#   stories/NNN_Title.epub            (with images, via Typst's HTML export + pandoc)
+#   stories/NNN_Title_no_images.epub  (without images)
 #
 # The EPUB is built from Typst's HTML export (not by reflowing the PDF, which
 # is messy) via `typst compile --features html`, then packaged with pandoc.
@@ -72,33 +73,47 @@ build_one() {
     typst compile --root . --input with_images=false "$wrapper" "${wrapper%.typ}_no_images.pdf"
     echo "  compiled ${wrapper%.typ}_no_images.pdf"
 
-    # EPUB: Typst's HTML export -> pandoc. Typst's HTML export bumps every
-    # heading level by one (its own doc title claims <h1>), so the set-name
-    # heading lands as <h2> and story titles as <h3>; split-level=3 chapters
-    # on story titles. The lone <h2> (just the set name, redundant with
-    # --metadata title) is stripped so it doesn't show up as an empty extra
-    # chapter/TOC entry.
-    local html_tmp="${wrapper%.typ}_epub_tmp.html"
-    local html_shrunk="${wrapper%.typ}_epub_tmp_shrunk.html"
+    build_epub "$wrapper" "$title" "$base" true "${wrapper%.typ}.epub"
+    build_epub "$wrapper" "$title" "$base" false "${wrapper%.typ}_no_images.epub"
+}
+
+# build_epub WRAPPER TITLE BASE WITH_IMAGES OUT
+#
+# EPUB: Typst's HTML export -> pandoc. Typst's HTML export bumps every
+# heading level by one (its own doc title claims <h1>), so the set-name
+# heading lands as <h2> and story titles as <h3>; split-level=3 chapters
+# on story titles. The lone <h2> (just the set name, redundant with
+# --metadata title) is stripped so it doesn't show up as an empty extra
+# chapter/TOC entry.
+build_epub() {
+    local wrapper="$1" title="$2" base="$3" with_images="$4" out="$5"
+    local tag="epub_tmp"
+    [[ "$with_images" == "false" ]] && tag="epub_tmp_no_images"
+    local html_tmp="${wrapper%.typ}_${tag}.html"
+    local html_shrunk="${wrapper%.typ}_${tag}_shrunk.html"
     local herr
-    if ! herr=$(typst compile --root . --features html --format html "$wrapper" "$html_tmp" 2>&1); then
+
+    local -a typst_args=(--root . --features html --format html)
+    [[ "$with_images" == "false" ]] && typst_args+=(--input with_images=false)
+
+    if ! herr=$(typst compile "${typst_args[@]}" "$wrapper" "$html_tmp" 2>&1); then
         echo "$herr" >&2
-        echo "  ERROR: HTML export failed for '$base', skipping epub" >&2
+        echo "  ERROR: HTML export failed for '$base' (with_images=$with_images), skipping $out" >&2
         rm -f "$html_tmp"
         return
     fi
     if ! herr=$(python3 "$(dirname "$0")/shrink_html_images.py" "$html_tmp" "$html_shrunk" 2>&1); then
         echo "$herr" >&2
-        echo "  ERROR: image shrink failed for '$base', skipping epub" >&2
+        echo "  ERROR: image shrink failed for '$base', skipping $out" >&2
         rm -f "$html_tmp" "$html_shrunk"
         return
     fi
     perl -0777 -pe 's/<h2>.*?<\/h2>//s' -i "$html_shrunk"
-    pandoc "$html_shrunk" -o "${wrapper%.typ}.epub" \
+    pandoc "$html_shrunk" -o "$out" \
         --split-level=3 --toc --toc-depth=3 \
         --metadata title="$title" --metadata author="Wizards of the Coast" 2>/dev/null
     rm -f "$html_tmp" "$html_shrunk"
-    echo "  compiled ${wrapper%.typ}.epub"
+    echo "  compiled $out"
 }
 
 if [[ $# -eq 0 ]]; then
