@@ -1,6 +1,7 @@
 # Its just so big file that Github wont accept it (300+ MB)
 COMPLETE_STORIES.pdf
 COMPLETE_STORIES_WITHOUT_IMAGES.pdf
+COMPLETE_STORIES_WITHOUT_IMAGES.epub
 stories/*.pdf
 stories/*.epub
 

@@ -2,7 +2,8 @@
 #
 # build_set.sh — regenerate a set's combined "stories/NNN_Title.typ" wrapper
 # from whatever story .typ files actually exist in "stories/NNN - Title/",
-# then compile it to PDF (with and without images).
+# then compile it to PDF and EPUB. Images are left out by default; pass
+# --with-images to also build the illustrated versions.
 #
 # This replaces hand-editing the #include list every time a story is added
 # to a set folder, and replaces manually typing the `typst compile` command
@@ -12,13 +13,14 @@
 #   ./build_set.sh                                    # process every set folder
 #   ./build_set.sh "063 - Secrets of Strixhaven"       # one set, by folder name
 #   ./build_set.sh 063                                 # one set, by number prefix
+#   ./build_set.sh --with-images 063                   # also build illustrated PDF/EPUB
 #
 # Output per set (written into stories/, alongside the set folder):
 #   stories/NNN_Title.typ             (regenerated wrapper)
-#   stories/NNN_Title.pdf             (with images)
 #   stories/NNN_Title_no_images.pdf   (without images)
-#   stories/NNN_Title.epub            (with images, via Typst's HTML export + pandoc)
-#   stories/NNN_Title_no_images.epub  (without images)
+#   stories/NNN_Title_no_images.epub  (without images, via Typst's HTML export + pandoc)
+#   stories/NNN_Title.pdf             (with images, only with --with-images)
+#   stories/NNN_Title.epub            (with images, only with --with-images)
 #
 # The EPUB is built from Typst's HTML export (not by reflowing the PDF, which
 # is messy) via `typst compile --features html`, then packaged with pandoc.
@@ -32,6 +34,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 STORIES_DIR="stories"
+
+WITH_IMAGES=false
+if [[ "${1:-}" == "--with-images" ]]; then
+    WITH_IMAGES=true
+    shift
+fi
 
 build_one() {
     local dir="$1"   # e.g. "stories/063 - Secrets of Strixhaven"
@@ -52,29 +60,44 @@ build_one() {
         files+=("$f")
     done < <(find "$dir" -maxdepth 1 -name '*.typ' | sort)
 
-    {
-        printf '#import "@local/mtgset:0.1.0": conf\n'
-        printf '#show: doc => conf("%s", doc)\n\n' "${title//\"/\\\"}"
-        for f in "${files[@]}"; do
-            printf '#include "%s"\n' "${f#"$STORIES_DIR"/}"
-        done
-    } > "$wrapper"
+    # Upstream maintains these wrappers too, so only rewrite one when its
+    # include list actually differs from the folder contents (ignoring the
+    # optional "./" prefix). Rewriting unchanged wrappers just manufactures
+    # merge conflicts the next time upstream is pulled.
+    local expected=""
+    for f in "${files[@]}"; do
+        expected+="${f#"$STORIES_DIR"/}"$'\n'
+    done
+    local current=""
+    if [[ -f "$wrapper" ]]; then
+        current="$(sed -n 's/^#include "\(\.\/\)\{0,1\}\(.*\)"$/\2/p' "$wrapper")"$'\n'
+    fi
 
-    echo "Wrote $wrapper (${#files[@]} stories)"
+    if [[ "$current" == "$expected" ]]; then
+        echo "Unchanged $wrapper (${#files[@]} stories)"
+    else
+        {
+            printf '#import "@local/mtgset:0.1.0": conf\n'
+            printf '#show: doc => conf("%s", doc)\n\n' "${title//\"/\\\"}"
+            printf '%s' "$expected" | sed 's/^\(.*\)$/#include "\1"/'
+        } > "$wrapper"
+        echo "Wrote $wrapper (${#files[@]} stories)"
+    fi
 
     if [[ ${#files[@]} -eq 0 ]]; then
         echo "  no story files found in '$base', skipping compile"
         return
     fi
 
-    typst compile --root . "$wrapper"
-    echo "  compiled ${wrapper%.typ}.pdf"
-
     typst compile --root . --input with_images=false "$wrapper" "${wrapper%.typ}_no_images.pdf"
     echo "  compiled ${wrapper%.typ}_no_images.pdf"
-
-    build_epub "$wrapper" "$title" "$base" true "${wrapper%.typ}.epub"
     build_epub "$wrapper" "$title" "$base" false "${wrapper%.typ}_no_images.epub"
+
+    if [[ "$WITH_IMAGES" == "true" ]]; then
+        typst compile --root . "$wrapper"
+        echo "  compiled ${wrapper%.typ}.pdf"
+        build_epub "$wrapper" "$title" "$base" true "${wrapper%.typ}.epub"
+    fi
 }
 
 # build_epub WRAPPER TITLE BASE WITH_IMAGES OUT
